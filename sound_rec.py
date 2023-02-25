@@ -7,7 +7,6 @@ Created on Mon Dec 26 19:57:52 2022
 """
 
 import time
-import datetime
 import importlib
 import pathlib
 import bottle
@@ -52,34 +51,53 @@ class Dummy():
 
 
 class Parec():
-    def __init__(self, path, backend=None, **config):
-        self.cmdline = 'parec -r --file-format=WAV {}'
+    def __init__(self, path, backend=None, file_format='WAV', file_name=None,
+                 **config):
+        if file_name is None:
+            self.file_name = '%Y%m%d_%H%M%S'
+        else:
+            self.file_name = file_name
+        self.file_format = file_format
+        self.cmdline = f'parec -r --file-format={file_format} {{}}'
         self.path = pathlib.Path(path)
         if not self.path.is_dir():
             self.path.mkdir()
         self.config = config
         self.recording = False
         self.time = 0
-        self.target = 'file.wav'
+        self.target = ''
+        self.process = None
+        self.error = None
 
     def status(self):
+        if self.process is not None and self.process.poll() is not None:
+            self.error = self.process.wait()
+            self.recording = False
+        res = dict(recording=self.recording,
+                   time=self.time,
+                   target=self.target)
         if self.recording:
-            return dict(recording=self.recording,
-                        time=time.time() - self.starttime,
-                        target=self.target)
-        else:
-            return dict(recording=self.recording,
-                        time=self.time,
-                        target=self.target)
+            res['time'] = time.time() - self.starttime
+        if self.error is not None:
+            res['error'] = self.error
+        return res
 
     def rec(self):
         if self.recording:
             self.stop()
         self.starttime = time.time()
-        self.target = time.strftime('%Y%m%d_%H%M%S.wav',
-                                    time.localtime(self.starttime))
-        target = (self.path / self.target).with_suffix('.wav')
+        target = time.strftime(self.file_name,
+                               time.localtime(self.starttime))
+        target = (self.path / target).with_suffix(f'.{self.file_format.lower()}')
+        self.target = str(target.relative_to(self.path))
+        p = target.parent
+        while not p.is_dir():
+            if p.parent.is_dir():
+                p.mkdir()
+                break
+            p = p.parent
         self.process = subprocess.Popen(self.cmdline.format(target).split())
+        self.error = None
         self.recording = True
 
     def stop(self):
@@ -87,7 +105,7 @@ class Parec():
             self.process.terminate()
             self.recording = False
             self.time = time.time() - self.starttime
-            self.process.wait()
+            self.error = self.process.wait()
 
 
 def read_config():
@@ -145,9 +163,10 @@ def config():
     global BCKND
     config = dict(bottle.request.params.items())
     if config:
+        reload = config.pop('reload', False)
         CONFIG.update(config)
         save_config(CONFIG)
-        if BCKND is None:
+        if BCKND is None or reload is not False:
             BCKND = init_backend()
     else:
         CONFIG = read_config()
@@ -157,4 +176,5 @@ def config():
 if __name__ == '__main__':
     CONFIG.update(read_config())
     BCKND = init_backend()
-    bottle.run(host='127.0.0.2', server='twisted', reloader=True, debug=True)
+    bottle.run(host='127.0.0.1', port=8090, server='twisted',
+               reloader=True, debug=True)
