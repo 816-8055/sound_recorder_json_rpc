@@ -16,7 +16,7 @@ import subprocess
 
 BCKND = None
 CONFIG = {}
-CONFIG_FILE = pathlib.Path('sound_rec.yml')
+CONFIG_FILE = pathlib.Path('~/sound_rec.yml').expanduser()
 
 
 class Dummy():
